@@ -26,6 +26,7 @@ A full-stack platform for monitoring tank fuel levels with anomaly detection, Io
   - `POST /api/refill/requests/<id>/action` (approve/reject)
   - `POST /api/auth/login` (username/password login)
   - `GET /api/auth/me` (token session validation)
+  - `POST /api/auth/change-password` (authenticated password rotation)
   - `POST /api/ingest`
 - SQLite operational database (`backend/fuel_monitor.db`)
 - Event classification rules:
@@ -52,6 +53,8 @@ A full-stack platform for monitoring tank fuel levels with anomaly detection, Io
 - `worker` / `Worker@123`
 - `manager` / `Manager@123`
 - `admin` / `Admin@123`
+
+Default bootstrap users are flagged with **must-change-password**. After first login they must update password before accessing operational data.
 
 Use environment variables to override defaults:
 
@@ -189,6 +192,19 @@ curl -X POST "http://localhost:5000/api/alerts/device-offline:esp32-generator-01
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"action":"resolve"}'
+```
+
+### Change password after login
+
+```bash
+TOKEN=$(curl -s -X POST "http://localhost:5000/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"worker","password":"Worker@123"}' | python -c "import sys, json; print(json.load(sys.stdin)['token'])")
+
+curl -X POST "http://localhost:5000/api/auth/change-password" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"current_password":"Worker@123","new_password":"Worker@Secure2026"}'
 ```
 
 ### Refill approval workflow
