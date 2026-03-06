@@ -155,11 +155,21 @@ def init_db() -> None:
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL,
                 is_active INTEGER NOT NULL,
+                must_change_password INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+
+        user_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "must_change_password" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
+            )
 
         connection.execute(
             """
@@ -207,7 +217,7 @@ def _bootstrap_default_users(connection: sqlite3.Connection) -> None:
     for username, password, role in _default_users_config():
         existing = connection.execute(
             """
-            SELECT id
+            SELECT id, password_hash, must_change_password
             FROM users
             WHERE username = ?
             LIMIT 1
@@ -215,12 +225,22 @@ def _bootstrap_default_users(connection: sqlite3.Connection) -> None:
             (username,),
         ).fetchone()
         if existing is not None:
+            if check_password_hash(existing["password_hash"], password) and int(existing["must_change_password"]) != 1:
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET must_change_password = 1,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now_iso, int(existing["id"])),
+                )
             continue
 
         connection.execute(
             """
-            INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, 1, ?, ?)
+            INSERT INTO users (username, password_hash, role, is_active, must_change_password, created_at, updated_at)
+            VALUES (?, ?, ?, 1, 1, ?, ?)
             """,
             (username, generate_password_hash(password), role, now_iso, now_iso),
         )
@@ -230,7 +250,7 @@ def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
             """
-            SELECT id, username, password_hash, role, is_active
+            SELECT id, username, password_hash, role, is_active, must_change_password
             FROM users
             WHERE username = ?
             LIMIT 1
@@ -251,6 +271,7 @@ def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
         "id": int(row["id"]),
         "username": row["username"],
         "role": row["role"],
+        "must_change_password": bool(int(row["must_change_password"])),
     }
 
 
@@ -258,7 +279,7 @@ def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
             """
-            SELECT id, username, role, is_active
+            SELECT id, username, role, is_active, must_change_password
             FROM users
             WHERE id = ?
             LIMIT 1
@@ -273,6 +294,51 @@ def get_user_by_id(user_id: int) -> dict[str, Any] | None:
         "id": int(row["id"]),
         "username": row["username"],
         "role": row["role"],
+        "must_change_password": bool(int(row["must_change_password"])),
+    }
+
+
+def change_user_password(*, user_id: int, current_password: str, new_password: str) -> dict[str, Any]:
+    if len(new_password) < 8:
+        raise ValueError("new_password must be at least 8 characters")
+
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, username, password_hash, role, is_active
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+
+        if row is None or int(row["is_active"]) != 1:
+            raise LookupError("user not found")
+
+        if not check_password_hash(row["password_hash"], current_password):
+            raise ValueError("current_password is invalid")
+
+        if check_password_hash(row["password_hash"], new_password):
+            raise ValueError("new_password must be different from current password")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            """
+            UPDATE users
+            SET password_hash = ?,
+                must_change_password = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (generate_password_hash(new_password), now_iso, user_id),
+        )
+
+    return {
+        "id": int(row["id"]),
+        "username": row["username"],
+        "role": row["role"],
+        "must_change_password": False,
     }
 
 
