@@ -1,11 +1,12 @@
 import random
 from datetime import datetime, timedelta, timezone
 
-from db import EXTERNAL_TANK, GENERATOR_TANK, get_connection, init_db, insert_sensor_payload
+from db import EXTERNAL_TANK, GENERATOR_TANK, get_connection, init_db, insert_sensor_payload, reset_default_users
 
 
 def seed_data() -> None:
     init_db()
+    reset_default_users()
 
     with get_connection() as connection:
         connection.execute("DELETE FROM sensor_data")
