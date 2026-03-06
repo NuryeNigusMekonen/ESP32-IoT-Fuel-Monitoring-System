@@ -117,6 +117,29 @@ npm run dev -- --host
 
 Open: `http://localhost:5173`
 
+## Branch Workflow (Backend / Frontend split)
+
+This repository uses three branches:
+
+- `main` → full integrated state
+- `backend` → backend-focused updates
+- `frontend` → frontend-focused updates
+
+Helper scripts are provided:
+
+```bash
+# Backend-only commit + push
+./scripts/push-backend.sh "feat: update backend logic"
+
+# Frontend-only commit + push
+./scripts/push-frontend.sh "feat: improve dashboard ui"
+
+# Full-stack commit + push on main
+./scripts/push-main.sh "chore: sync full system updates"
+```
+
+The backend script stages `backend/` (and shared operational files), while frontend script stages `frontend/`, `screenshoot/`, and shared docs/scripts.
+
 ## API Examples
 
 ### Health
