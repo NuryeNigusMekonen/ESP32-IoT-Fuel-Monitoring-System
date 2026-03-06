@@ -2,6 +2,10 @@
 
 A full-stack platform for monitoring tank fuel levels with anomaly detection, IoT reliability scoring, and live operational dashboarding.
 
+## Dashboard Preview
+
+![Operations Dashboard](screenshoot/dashboard.png)
+
 ## Monorepo Structure
 
 - `backend/` Flask API + SQLite storage + seed generator
