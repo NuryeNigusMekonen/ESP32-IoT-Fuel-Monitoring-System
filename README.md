@@ -54,7 +54,7 @@ A full-stack platform for monitoring tank fuel levels with anomaly detection, Io
 - `manager` / `Manager@123`
 - `admin` / `Admin@123`
 
-Default bootstrap users are flagged with **must-change-password**. After first login they must update password before accessing operational data.
+All bootstrap users are forced into password rotation when they authenticate using default credentials. Each person must log in with their own username + current password and set a new password before accessing operational data.
 
 Use environment variables to override defaults:
 
