@@ -10,6 +10,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from db import (
     authenticate_user,
+    change_user_password,
     get_user_by_id,
     init_db,
     insert_sensor_payload,
@@ -109,28 +110,28 @@ def _extract_bearer_token() -> str | None:
     return token or None
 
 
-def _auth_context() -> tuple[str, str]:
+def _auth_context() -> tuple[str, str, bool, int]:
     token = _extract_bearer_token()
     if not token:
-        return "", ""
+        return "", "", False, 0
 
     payload = _decode_token(token)
     if payload is None:
-        return "", ""
+        return "", "", False, 0
 
     user = get_user_by_id(int(payload.get("user_id", 0)))
     if user is None:
-        return "", ""
+        return "", "", False, 0
 
     role = str(user["role"]).lower()
     if role not in {"worker", "manager", "admin"}:
-        return "", ""
-    return str(user["username"]), role
+        return "", "", False, 0
+    return str(user["username"]), role, bool(user.get("must_change_password", False)), int(user["id"])
 
 
-def _require_role(minimum_role: str) -> tuple[str, str] | tuple[dict, int]:
+def _require_role(minimum_role: str, *, allow_if_password_change_required: bool = False) -> tuple[str, str] | tuple[dict, int]:
     hierarchy = {"worker": 1, "manager": 2, "admin": 3}
-    user_id, role = _auth_context()
+    user_id, role, must_change_password, _ = _auth_context()
     if AUTH_REQUIRED and (not user_id or not role):
         return {"error": "authentication required"}, 401
 
@@ -139,6 +140,9 @@ def _require_role(minimum_role: str) -> tuple[str, str] | tuple[dict, int]:
 
     if hierarchy.get(role, 0) < hierarchy.get(minimum_role, 99):
         return {"error": f"{minimum_role} role required"}, 403
+
+    if must_change_password and not allow_if_password_change_required:
+        return {"error": "password change required", "code": "PASSWORD_CHANGE_REQUIRED"}, 403
     return user_id, role
 
 
@@ -218,7 +222,7 @@ def alert_action(alert_key: str) -> tuple:
     action = str(payload.get("action", "")).strip().lower()
     silence_minutes = payload.get("silence_minutes")
 
-    operator_id, operator_role = _auth_context()
+    operator_id, operator_role, _, _ = _auth_context()
 
     try:
         result = update_sla_alert_state(
@@ -249,7 +253,7 @@ def ingest() -> tuple:
         return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
 
     try:
-        user_id, _ = _auth_context()
+        user_id, _, _, _ = _auth_context()
         if not user_id:
             user_id = "telemetry-gateway"
         result = insert_sensor_payload(
@@ -338,7 +342,7 @@ def refill_request_action(request_id: int) -> tuple:
 
     payload = request.get_json(silent=True) or {}
     action = str(payload.get("action", "")).strip().lower()
-    actor_id, actor_role = _auth_context()
+    actor_id, actor_role, _, _ = _auth_context()
 
     try:
         result = process_refill_request(
@@ -388,6 +392,7 @@ def login() -> tuple:
                 "id": user["id"],
                 "username": user["username"],
                 "role": user["role"],
+                "must_change_password": bool(user.get("must_change_password", False)),
             },
         }
     ), 200
@@ -395,10 +400,52 @@ def login() -> tuple:
 
 @app.get("/api/auth/me")
 def me() -> tuple:
-    user_id, role = _auth_context()
+    user_id, role, must_change_password, _ = _auth_context()
     if not user_id or not role:
         return jsonify({"error": "authentication required"}), 401
-    return jsonify({"user": {"username": user_id, "role": role}}), 200
+    return jsonify({"user": {"username": user_id, "role": role, "must_change_password": must_change_password}}), 200
+
+
+@app.post("/api/auth/change-password")
+def auth_change_password() -> tuple:
+    access = _require_role("worker", allow_if_password_change_required=True)
+    if isinstance(access, tuple) and len(access) == 2 and isinstance(access[0], dict):
+        return jsonify(access[0]), access[1]
+
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    current_password = str(payload.get("current_password", "")).strip()
+    new_password = str(payload.get("new_password", "")).strip()
+
+    if not current_password or not new_password:
+        return jsonify({"error": "current_password and new_password are required"}), 400
+
+    _, _, _, user_id = _auth_context()
+
+    try:
+        updated_user = change_user_password(
+            user_id=user_id,
+            current_password=current_password,
+            new_password=new_password,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+
+    token = _create_token(updated_user)
+    return jsonify({
+        "status": "ok",
+        "token": token,
+        "user": {
+            "id": updated_user["id"],
+            "username": updated_user["username"],
+            "role": updated_user["role"],
+            "must_change_password": False,
+        },
+    }), 200
 
 
 if __name__ == "__main__":

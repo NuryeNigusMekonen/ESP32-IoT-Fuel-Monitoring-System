@@ -53,8 +53,12 @@ export default function App() {
   const [refillRequests, setRefillRequests] = useState({ summary: { total: 0, pending: 0, executed: 0, rejected: 0 }, requests: [] });
   const [authToken, setAuthToken] = useState(localStorage.getItem(AUTH_TOKEN_KEY) || "");
   const [authUser, setAuthUser] = useState(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loginUsername, setLoginUsername] = useState("worker");
   const [loginPassword, setLoginPassword] = useState("Worker@123");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [alertsBusy, setAlertsBusy] = useState(false);
   const [refillBusy, setRefillBusy] = useState(false);
@@ -160,10 +164,12 @@ export default function App() {
         }
         const payload = await response.json();
         setAuthUser(payload.user || null);
+        setMustChangePassword(Boolean(payload.user?.must_change_password));
       } catch {
         setAuthToken("");
         localStorage.removeItem(AUTH_TOKEN_KEY);
         setAuthUser(null);
+        setMustChangePassword(false);
       } finally {
         setAuthLoading(false);
       }
@@ -173,13 +179,13 @@ export default function App() {
   }, [authHeaders, authToken]);
 
   useEffect(() => {
-    if (!authUser) {
+    if (!authUser || mustChangePassword) {
       return undefined;
     }
     loadData();
     const timer = setInterval(loadData, 5000);
     return () => clearInterval(timer);
-  }, [authUser]);
+  }, [authUser, mustChangePassword]);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -198,6 +204,8 @@ export default function App() {
       setAuthToken(payload.token);
       localStorage.setItem(AUTH_TOKEN_KEY, payload.token);
       setAuthUser(payload.user);
+      setMustChangePassword(Boolean(payload.user?.must_change_password));
+      setCurrentPassword(loginPassword);
       setError("");
     } catch (loginError) {
       setError(loginError.message || "Unable to login");
@@ -207,7 +215,50 @@ export default function App() {
   const handleLogout = () => {
     setAuthToken("");
     setAuthUser(null);
+    setMustChangePassword(false);
     localStorage.removeItem(AUTH_TOKEN_KEY);
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/change-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Password update failed");
+      }
+
+      setAuthToken(payload.token);
+      localStorage.setItem(AUTH_TOKEN_KEY, payload.token);
+      setAuthUser(payload.user);
+      setMustChangePassword(false);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setError("");
+    } catch (changeError) {
+      setError(changeError.message || "Unable to update password");
+    }
   };
 
   const runAlertAction = async (alertKey, action, silenceMinutes = 30) => {
@@ -352,6 +403,61 @@ export default function App() {
               <p><strong>Manager:</strong> approve refill + actions</p>
               <p><strong>Admin:</strong> full control + privileged resolve</p>
             </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  if (mustChangePassword) {
+    return (
+      <div className="app-shell">
+        <header className="top-bar">
+          <div className="logo-pill">OIL LIBYA ETHIOPIA</div>
+          <div className="session-pill">{authUser.username} · {authUser.role}</div>
+        </header>
+        <main className="dashboard auth-dashboard">
+          {error && <section className="error-banner">{error}</section>}
+          <section className="panel auth-panel">
+            <div className="panel-header">
+              <h2>Password Update Required</h2>
+            </div>
+            <p className="auth-subtitle">
+              For security, change your default password before accessing the operations dashboard.
+            </p>
+            <form className="auth-form" onSubmit={handleChangePassword}>
+              <label className="auth-label" htmlFor="current-password-input">Current Password</label>
+              <input
+                id="current-password-input"
+                className="operator-input"
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                placeholder="Current password"
+                autoComplete="current-password"
+              />
+              <label className="auth-label" htmlFor="new-password-input">New Password</label>
+              <input
+                id="new-password-input"
+                className="operator-input"
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="New password (min 8 chars)"
+                autoComplete="new-password"
+              />
+              <label className="auth-label" htmlFor="confirm-password-input">Confirm New Password</label>
+              <input
+                id="confirm-password-input"
+                className="operator-input"
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="Confirm new password"
+                autoComplete="new-password"
+              />
+              <button type="submit" className="action-btn auth-btn">Update Password</button>
+            </form>
           </section>
         </main>
       </div>
