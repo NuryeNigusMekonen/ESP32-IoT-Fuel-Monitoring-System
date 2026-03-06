@@ -260,6 +260,8 @@ source .venv/bin/activate
 python seed.py
 ```
 
+This also resets default users (`worker`, `manager`, `admin`) back to their configured default passwords and marks them as `must_change_password=true` for first login rotation.
+
 ## ESP32 Telemetry Simulator
 
 Use the simulator to stress telemetry ingestion and trigger SLA policies:

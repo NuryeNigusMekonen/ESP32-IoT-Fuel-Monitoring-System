@@ -253,6 +253,45 @@ def _bootstrap_default_users(connection: sqlite3.Connection) -> None:
         )
 
 
+def reset_default_users() -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_connection() as connection:
+        for username, password, role in _default_users_config():
+            existing = connection.execute(
+                """
+                SELECT id
+                FROM users
+                WHERE username = ?
+                LIMIT 1
+                """,
+                (username,),
+            ).fetchone()
+
+            password_hash = generate_password_hash(password)
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO users (username, password_hash, role, is_active, must_change_password, created_at, updated_at)
+                    VALUES (?, ?, ?, 1, 1, ?, ?)
+                    """,
+                    (username, password_hash, role, now_iso, now_iso),
+                )
+                continue
+
+            connection.execute(
+                """
+                UPDATE users
+                SET password_hash = ?,
+                    role = ?,
+                    is_active = 1,
+                    must_change_password = 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (password_hash, role, now_iso, int(existing["id"])),
+            )
+
+
 def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
