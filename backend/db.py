@@ -31,6 +31,13 @@ def _default_users_config() -> list[tuple[str, str, str]]:
     ]
 
 
+def _default_password_for_username(username: str) -> str | None:
+    for configured_username, configured_password, _ in _default_users_config():
+        if configured_username == username:
+            return configured_password
+    return None
+
+
 def _clamp_level(value: float) -> float:
     return max(0.0, min(100.0, value))
 
@@ -267,11 +274,28 @@ def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
     if not check_password_hash(row["password_hash"], password):
         return None
 
+    must_change_password = bool(int(row["must_change_password"]))
+    configured_default_password = _default_password_for_username(username)
+    logged_in_with_default_password = configured_default_password is not None and password == configured_default_password
+
+    if logged_in_with_default_password and not must_change_password:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                UPDATE users
+                SET must_change_password = 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (datetime.now(timezone.utc).isoformat(), int(row["id"])),
+            )
+        must_change_password = True
+
     return {
         "id": int(row["id"]),
         "username": row["username"],
         "role": row["role"],
-        "must_change_password": bool(int(row["must_change_password"])),
+        "must_change_password": must_change_password,
     }
 
 
